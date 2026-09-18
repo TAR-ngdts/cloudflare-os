@@ -1,0 +1,22 @@
+{
+  "name": "@gadgets/ng-dots-gatekeeper",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/ng-dots.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "clean": "rm -rf .wrangler dist",
+    "deploy": "wrangler deploy",
+    "test:run": "vitest run __tests__"
+  },
+  "dependencies": {
+    "@gadgets/gatekeeper-kit": "workspace:*",
+    "@gadgets/workshop-shared": "workspace:*",
+    "capnweb-validate": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

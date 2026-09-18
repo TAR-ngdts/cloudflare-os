@@ -1,0 +1,8 @@
+[
+  {
+    "name": "GATEWAY_URL",
+    "kind": "var",
+    "label": "NG Dots gateway URL",
+    "help": "The HTTPS base URL of your organization's NG Dots gateway. The gateway must allow this Cloudflare OS instance's NG Dots callback base."
+  }
+]

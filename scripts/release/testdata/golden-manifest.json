@@ -608,6 +608,55 @@
         "MCP_ALLOW_INSECURE": "false"
       }
     },
+    "gatekeeper-ng-dots": {
+      "bindings": [],
+      "compatibilityDate": "2026-09-04",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [
+        {
+          "help": "The HTTPS base URL of your organization's NG Dots gateway. The gateway must allow this Cloudflare OS instance's NG Dots callback base.",
+          "kind": "var",
+          "label": "NG Dots gateway URL",
+          "name": "GATEWAY_URL"
+        }
+      ],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "ng-dots.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "NgDotsUserAccount",
+            "NgDotsGatekeeper"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "ng-dots.js",
+          "r2Key": "blobs/modules/3c260bda897f0036efe6b0ef014cc522a20138f257f30229a823b0b31476e175",
+          "sha256": "3c260bda897f0036efe6b0ef014cc522a20138f257f30229a823b0b31476e175",
+          "size": 60,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "ngdots",
+      "singleton": true,
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/ngdots",
+        "GATEWAY_URL": "https://ngdots.example.com"
+      }
+    },
     "gatekeeper-notion": {
       "bindings": [
         {

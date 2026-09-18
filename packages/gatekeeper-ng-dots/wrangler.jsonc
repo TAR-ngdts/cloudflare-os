@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gatekeeper-ng-dots",
+  "main": ".wrangler/validate/src/ng-dots.ts",
+  "build": {
+    "command": "pnpm exec capnweb-validate build --out .wrangler/validate",
+    "watch_dir": "src"
+  },
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["allow_irrevocable_stub_storage"],
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": false }],
+  "vars": {
+    "GATEWAY_URL": "https://ngdots.example.com",
+    "BASE_URL": "http://localhost:8787/gatekeeper/ng-dots"
+  },
+  "migrations": [
+    {
+      "tag": "v0",
+      "new_sqlite_classes": ["NgDotsUserAccount", "NgDotsGatekeeper"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false }
+  }
+}

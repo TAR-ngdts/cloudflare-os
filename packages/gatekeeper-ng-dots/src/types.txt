@@ -1,0 +1,58 @@
+export interface NgDotsImportFile {
+  path: string;
+  kind?: "file" | "symlink";
+  size?: number;
+}
+
+export interface NgDotsImportRequest {
+  files: NgDotsImportFile[];
+  packageJson?: {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
+  };
+}
+
+export interface NgDotsSourceFile {
+  path: string;
+  /** Base64 file content. Paths under .git/ and .github/, secret-bearing files, and symlinks are rejected. */
+  contentBase64: string;
+  mode?: "100644" | "100755";
+}
+
+export interface NgDotsVibeAppInput {
+  businessUnit: string;
+  slug: string;
+  /** Complete source tree: at most 2000 files, 2 MiB each, 8 MiB total. */
+  files: NgDotsSourceFile[];
+  /** Review-level finding codes (for example "missing_lockfile") the requester accepts. Blocking findings cannot be acknowledged. */
+  acknowledgedFindingCodes?: string[];
+}
+
+export interface NgDotsOperationStatus {
+  approvalId: number;
+  operation: "createVibeApp" | "importVibeApp";
+  appId: string;
+  state: "staged" | "pending" | "running" | "failed" | "completed";
+  branch: string;
+  stages: {
+    repositoryProvisioned: boolean;
+    sourceBranchCreated: { branch: string; commitSha: string } | null;
+    pullRequestOpened: { number: number; url: string; autoMergeRequested: boolean } | null;
+  };
+  /** Stages that have not been observed yet. Never assume them. */
+  notObserved: string[];
+  lastError: string | null;
+}
+
+export interface NgDotsSession {
+  getIdentity(): Promise<unknown>;
+  listApps(): Promise<unknown>;
+  listModels(): Promise<unknown>;
+  getApp(appId: string): Promise<unknown>;
+  inspectImport(request: NgDotsImportRequest): Promise<unknown>;
+  /** Queues one approval that provisions the repository, publishes the source to a new ng-dots branch, and opens a pull request. */
+  createVibeApp(input: NgDotsVibeAppInput): Promise<{ approvalId: number }>;
+  importVibeApp(input: NgDotsVibeAppInput): Promise<{ approvalId: number }>;
+  getVibeAppOperation(approvalId: number): Promise<NgDotsOperationStatus>;
+}

@@ -294,6 +294,7 @@ const PREINSTALL = new Set(["gatekeeper-context", "gatekeeper-scheduler"]);
 // only because every ambient gatekeeper we ship is also preinstalled.
 const SINGLETON = new Set([
   "gatekeeper-context",       // (1) ambient ContextLibrary
+  "gatekeeper-ng-dots",       // (1) connected NG Dots account singleton
   "gatekeeper-scheduler",     // (1) ambient ScheduleSession
   "gatekeeper-homeassistant", // (2) no inputs; users connect their own URL + token in-app
   "gatekeeper-mcp",           // (2) no inputs; users paste their own endpoints in-app
