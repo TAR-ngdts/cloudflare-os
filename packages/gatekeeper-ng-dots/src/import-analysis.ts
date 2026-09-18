@@ -31,7 +31,6 @@ export type ImportReport = {
 const SECRET_FILE = /(^|\/)(\.env($|\.)|.*\.(pem|key|p12|pfx)|credentials?\.json$|service-account.*\.json$)/i;
 const EXAMPLE_ENV = /(^|\/)\.env\.(example|sample|template)$/i;
 const BACKEND_PATH = /(^|\/)(api|server|backend|functions|workers?)(\/|$)/i;
-const LOCKFILES = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"]);
 const MAX_FILES = 2_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 // Matches the gateway source-publication limit so an approved import cannot fail on size.
@@ -98,10 +97,14 @@ export function inspectImport(request: ImportRequest): ImportReport {
   if (totalBytes > MAX_TOTAL_BYTES) findings.push({ severity: "blocking", code: "source_too_large", message: "The source inventory exceeds the 8 MiB hosted-import limit." });
 
   const framework = detectFramework(request, paths);
-  if (![...paths].some(path => LOCKFILES.has(path.split("/").at(-1)!))) {
-    findings.push({ severity: "review", code: "missing_lockfile", message: "No supported dependency lockfile was found." });
+  // The hosted build adapter runs `npm ci` in the imported frontend, so vite and CRA need a root package-lock.json (as in the desktop plugin).
+  if ((framework === "vite" || framework === "create-react-app") && !paths.has("package-lock.json")) {
+    findings.push({ severity: "blocking", code: "package_lock_required", message: "Generate and review the source project's package-lock.json before import; the hosted build uses npm ci." });
   }
-  if (framework === "next") findings.push({ severity: "review", code: "next_runtime", message: "Next.js runtime features need compatibility review before import." });
+  if (framework === "vite" && [...paths].filter(path => /^vite\.config\.[cm]?[jt]s$/.test(path)).length > 1) {
+    findings.push({ severity: "blocking", code: "ambiguous_vite_config", message: "More than one vite.config file was found." });
+  }
+  if (framework === "next") findings.push({ severity: "blocking", code: "next_runtime", message: "Next.js server routes, middleware, and rendering need porting; import a static export or port server features first." });
   if (framework === "unknown") findings.push({ severity: "blocking", code: "unsupported_framework", message: "Could not identify a supported frontend project." });
 
   return {

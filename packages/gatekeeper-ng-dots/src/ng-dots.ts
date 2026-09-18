@@ -35,7 +35,7 @@ import {
   type OperationKind,
   type VibeAppOperation,
 } from "./operations";
-import { prepareSource, validateIdentity, type VibeAppInput } from "./source";
+import { prepareSource, validateIdentity, validateName, type CreateVibeAppInput, type ImportVibeAppInput, type PreparedSource } from "./source";
 import TYPES_CODE from "./types.txt";
 
 type Env = Cloudflare.Env & {
@@ -361,11 +361,11 @@ export class NgDotsSession extends RpcTarget {
   }
 
   /** One approval covers repository provisioning, source publication to a new ng-dots branch, and the pull request. */
-  async createVibeApp(input: VibeAppInput): Promise<{ approvalId: number }> {
+  async createVibeApp(input: CreateVibeAppInput): Promise<{ approvalId: number }> {
     return this.gatekeeper.submitOperation(this.queue, "createVibeApp", input);
   }
 
-  async importVibeApp(input: VibeAppInput): Promise<{ approvalId: number }> {
+  async importVibeApp(input: ImportVibeAppInput): Promise<{ approvalId: number }> {
     return this.gatekeeper.submitOperation(this.queue, "importVibeApp", input);
   }
 
@@ -412,9 +412,12 @@ export class NgDotsGatekeeper extends DurableObject<Env, GatekeeperProps> implem
     return next;
   }
 
-  async submitOperation(queue: RpcStub<ApprovalQueue>, type: OperationKind, input: VibeAppInput): Promise<{ approvalId: number }> {
+  async submitOperation(queue: RpcStub<ApprovalQueue>, type: OperationKind, input: CreateVibeAppInput | ImportVibeAppInput): Promise<{ approvalId: number }> {
     const identity = validateIdentity(input);
-    const source = prepareSource(input);
+    const name = validateName(input.name, identity.slug);
+    // A create uses the pinned template and takes no source; only an import is analyzed and staged.
+    const source: PreparedSource | null = type === "importVibeApp" ? prepareSource(input as ImportVibeAppInput) : null;
+    if (type === "createVibeApp" && "files" in input && input.files !== undefined) throw new Error("files_not_supported_for_create");
     const approvalId = this.#nextId();
     const verb = type === "createVibeApp" ? "Create" : "Import";
     const operation: VibeAppOperation = {
@@ -423,10 +426,12 @@ export class NgDotsGatekeeper extends DurableObject<Env, GatekeeperProps> implem
       input: identity,
       branch: newBranch(type),
       title: `${verb} VibeApp ${identity.businessUnit}/${identity.slug}`.slice(0, 160),
-      framework: source.report.framework,
-      fileCount: source.report.fileCount,
-      totalBytes: source.totalBytes,
-      reviewedFindingCodes: [...new Set(source.reviewFindings.map((finding: ImportFinding) => finding.code))],
+      name,
+      framework: source?.report.framework ?? "",
+      gatewayFramework: source?.framework,
+      fileCount: source?.report.fileCount ?? 0,
+      totalBytes: source?.totalBytes ?? 0,
+      reviewedFindingCodes: [...new Set((source?.reviewFindings ?? []).map((finding: ImportFinding) => finding.code))],
       sourceChunks: storeSource(this.ctx.storage.kv, approvalId, source),
       state: "staged",
       stages: {},
@@ -436,7 +441,7 @@ export class NgDotsGatekeeper extends DurableObject<Env, GatekeeperProps> implem
     try {
       await queue.submitAction(approvalId, {
         title: `${verb} VibeApp ${identity.businessUnit}/${identity.slug}`,
-        description: approvalText(operation, source.reviewFindings),
+        description: approvalText(operation, source?.reviewFindings ?? []),
         implementsRevert: false,
         awaitDecision: true,
         actionKind: { tag: `ng-dots.${type === "createVibeApp" ? "create" : "import"}-vibe-app`, label: `${verb} VibeApp` },

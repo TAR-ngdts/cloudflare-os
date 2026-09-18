@@ -6,17 +6,29 @@ export type SourceFileInput = {
   mode?: "100644" | "100755";
 };
 
-export type VibeAppInput = {
+export type CreateVibeAppInput = {
   businessUnit: string;
   slug: string;
+  /** Display name for the app; defaults to the slug. */
+  name?: string;
+};
+
+export type ImportVibeAppInput = {
+  businessUnit: string;
+  slug: string;
+  name?: string;
   files: SourceFileInput[];
   /** Codes of review-level findings the requester has read and accepts. Blocking findings can never be acknowledged. */
   acknowledgedFindingCodes?: string[];
 };
 
+/** Framework spelling used by the gateway's hosted build adapter. */
+export type GatewayFramework = "vite" | "cra" | "static";
+
 export type PreparedSource = {
   files: Array<{ path: string; contentBase64: string; mode: "100644" | "100755" }>;
   report: ImportReport;
+  framework: GatewayFramework;
   reviewFindings: ImportFinding[];
   totalBytes: number;
 };
@@ -30,6 +42,14 @@ export function validateIdentity(input: { slug: string; businessUnit: string }):
   return { slug: input.slug, businessUnit: input.businessUnit };
 }
 
+export function validateName(name: string | undefined, slug: string): string {
+  const value = name ?? slug;
+  if (typeof value !== "string" || !value.trim() || value.length > 80 || [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+    throw new Error("invalid_name");
+  }
+  return value;
+}
+
 function decodedLength(value: string): number {
   if (typeof value !== "string" || value.length % 4 !== 0 || !BASE64.test(value)) throw new Error("invalid_file_content");
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
@@ -40,12 +60,14 @@ function decodeText(value: string): string {
   return new TextDecoder().decode(Uint8Array.from(atob(value), character => character.charCodeAt(0)));
 }
 
+const GATEWAY_FRAMEWORK: Record<string, GatewayFramework | undefined> = { vite: "vite", "create-react-app": "cra", static: "static" };
+
 /**
  * Re-derives every size from the actual content (never from caller-supplied numbers), runs the shared analyzer,
  * and fails closed before anything reaches the approval queue or the gateway.
  */
-export function prepareSource(input: VibeAppInput): PreparedSource {
-  if (!input || !Array.isArray(input.files)) throw new Error("files_required");
+export function prepareSource(input: ImportVibeAppInput): PreparedSource {
+  if (!input || !Array.isArray(input.files) || input.files.length === 0) throw new Error("files_required");
   const seen = new Set<string>();
   let payloadChars = 0;
   const inventory = input.files.map(file => {
@@ -75,9 +97,12 @@ export function prepareSource(input: VibeAppInput): PreparedSource {
   const missing = [...new Set(reviewFindings.map(finding => finding.code))].filter(code => !acknowledged.has(code));
   if (missing.length) throw new Error(`review_findings_require_acknowledgement: ${missing.join(", ")}`);
 
+  const framework = GATEWAY_FRAMEWORK[report.framework];
+  if (!framework) throw new Error("unsupported_framework");
   return {
     files: input.files.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode ?? "100644" })),
     report,
+    framework,
     reviewFindings,
     totalBytes: report.totalBytes,
   };

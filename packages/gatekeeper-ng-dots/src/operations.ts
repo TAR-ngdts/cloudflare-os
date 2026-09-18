@@ -10,7 +10,11 @@ export type VibeAppOperation = {
   input: { businessUnit: string; slug: string };
   branch: string;
   title: string;
+  /** Display name written into the generated app's configuration. */
+  name: string;
+  /** Detected framework for imports; empty for a create, which uses the pinned NG Dots template. */
   framework: string;
+  gatewayFramework?: "vite" | "cra" | "static";
   fileCount: number;
   totalBytes: number;
   reviewedFindingCodes: string[];
@@ -21,7 +25,7 @@ export type VibeAppOperation = {
   /** Each stage is recorded only after the gateway response for it was validated. Later states are never inferred. */
   stages: {
     repositoryProvisioned?: { repository?: string };
-    sourceBranchCreated?: { branch: string; commitSha: string };
+    sourceBranchCreated?: { branch: string; commitSha: string; files?: number; dropped?: number };
     pullRequestOpened?: { number: number; url: string; autoMergeRequested: boolean };
   };
   lastError?: string;
@@ -49,7 +53,8 @@ export function operationKey(id: number): string { return `operation:${id}`; }
 function sourceKey(id: number, index: number): string { return `operation:${id}:source:${index}`; }
 
 /** DO storage values are capped near 2 MB, so the manifest is stored as JSON in bounded chunks. */
-export function storeSource(kv: KvStore, id: number, source: PreparedSource): number {
+export function storeSource(kv: KvStore, id: number, source: PreparedSource | null): number {
+  if (!source) return 0;
   const json = JSON.stringify(source.files);
   let count = 0;
   for (let offset = 0; offset < json.length; offset += CHUNK_CHARS) kv.put(sourceKey(id, count++), json.slice(offset, offset + CHUNK_CHARS));
@@ -72,20 +77,21 @@ export function discardSource(kv: KvStore, operation: VibeAppOperation): void {
 
 export function approvalText(operation: VibeAppOperation, reviewFindings: ImportFinding[]): string {
   const { businessUnit, slug } = operation.input;
-  const verb = operation.type === "createVibeApp" ? "Create" : "Import";
+  const isCreate = operation.type === "createVibeApp";
   const findings = reviewFindings.length
     ? reviewFindings.map(finding => `- **${finding.code}**${finding.path ? ` (${finding.path})` : ""}: ${finding.message}`).join("\n")
     : "- None.";
+  const source = isCreate
+    ? `- Source: the pinned NG Dots starter template (React + Hono on Workers), configured for **${businessUnit}/${slug}** and named "${operation.name}".`
+    : `- Source: ${operation.fileCount} imported files, ${(operation.totalBytes / 1024).toFixed(1)} KiB, framework **${operation.framework}**, placed under \`frontend/\` with NG Dots' build adapter. Build folders such as \`node_modules\` and \`dist\` are dropped.`;
   return [
-    `${verb} the VibeApp **${businessUnit}/${slug}** in NG Dots.`,
+    `${isCreate ? "Create" : "Import"} the VibeApp **${businessUnit}/${slug}** in NG Dots.`,
     "",
-    `- Source: ${operation.fileCount} files, ${(operation.totalBytes / 1024).toFixed(1)} KiB, framework **${operation.framework}**.`,
+    source,
     `- Branch: \`${operation.branch}\` (a new branch; \`main\` is never written directly).`,
-    "- Steps: provision the governed private repository if it does not exist, publish this source to the branch, then open a pull request into `main`.",
+    "- Steps: provision the governed private repository if it does not exist, publish the application to the branch, then open a pull request into `main`.",
     "- The pull request is subject to the repository's required checks and review rules, and NG Dots may enable auto-merge on it. Merge and deployment are **not** part of this approval and are reported only once observed.",
-    "",
-    "Review findings you are accepting:",
-    findings,
+    ...(isCreate ? [] : ["", "Review findings you are accepting:", findings]),
   ].join("\n");
 }
 
@@ -130,6 +136,8 @@ export async function runOperation(kv: KvStore, call: GatewayCall, operation: Vi
   try {
     if (!operation.stages.repositoryProvisioned) {
       const app = object(await call("/api/apps", "POST", operation.input), "gateway_app_response_invalid");
+      // Same guard as the desktop plugin: a pull request without the protected workflows cannot be validated or deployed.
+      if (app.workflowsSeeded !== true) throw new Error("workflow_seed_unavailable");
       operation.stages.repositoryProvisioned = { repository: typeof app.repo === "string" ? app.repo : undefined };
       kv.put(key, operation);
     }
@@ -141,17 +149,27 @@ export async function runOperation(kv: KvStore, call: GatewayCall, operation: Vi
         operation.baseSha = base.sha;
         kv.put(key, operation);
       }
-      const published = object(await call(`${appPath}/source-branches`, "POST", {
-        operation: operation.type === "createVibeApp" ? "create" : "import",
-        branch: operation.branch,
-        baseSha: operation.baseSha,
-        files: loadSource(kv, operation),
-        importReport: { framework: operation.framework, reviewedFindingCodes: operation.reviewedFindingCodes },
-      }), "gateway_source_response_invalid");
+      const request = operation.type === "createVibeApp"
+        ? { operation: "create", branch: operation.branch, baseSha: operation.baseSha, name: operation.name }
+        : {
+            operation: "import",
+            branch: operation.branch,
+            baseSha: operation.baseSha,
+            name: operation.name,
+            framework: operation.gatewayFramework,
+            files: loadSource(kv, operation),
+            importReport: { reviewedFindingCodes: operation.reviewedFindingCodes },
+          };
+      const published = object(await call(`${appPath}/source-branches`, "POST", request), "gateway_source_response_invalid");
       if (published.branch !== operation.branch || typeof published.commitSha !== "string" || !SHA.test(published.commitSha)) {
         throw new Error("gateway_source_response_invalid");
       }
-      operation.stages.sourceBranchCreated = { branch: operation.branch, commitSha: published.commitSha };
+      operation.stages.sourceBranchCreated = {
+        branch: operation.branch,
+        commitSha: published.commitSha,
+        ...(Number.isSafeInteger(published.files) ? { files: published.files as number } : {}),
+        ...(Number.isSafeInteger(published.dropped) ? { dropped: published.dropped as number } : {}),
+      };
       kv.put(key, operation);
     }
 

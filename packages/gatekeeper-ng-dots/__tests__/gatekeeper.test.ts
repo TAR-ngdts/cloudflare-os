@@ -218,15 +218,15 @@ describe("governed reads", () => {
 
 const sourceFiles = () => [
   { path: "package.json", contentBase64: b64(JSON.stringify({ devDependencies: { vite: "^7" } })) },
-  { path: "pnpm-lock.yaml", contentBase64: b64("lock") },
+  { path: "package-lock.json", contentBase64: b64("{}") },
   { path: "src/main.tsx", contentBase64: b64("console.log(1)") },
 ];
 
 function pipelineHandlers(overrides: Record<string, Handler> = {}): Record<string, Handler> {
   return {
-    "POST /api/apps": () => gatewayJson({ id: "demo/app", repo: "org/demo-app" }, 201),
+    "POST /api/apps": () => gatewayJson({ id: "demo/app", repo: "org/demo-app", workflowsSeeded: true }, 201),
     "GET /api/apps/demo/app/default-branch": () => gatewayJson({ branch: "main", sha: SHA_BASE }),
-    "POST /api/apps/demo/app/source-branches": (_u, init) => gatewayJson({ branch: JSON.parse(String(init.body)).branch, commitSha: SHA_COMMIT, baseSha: SHA_BASE }, 201),
+    "POST /api/apps/demo/app/source-branches": (_u, init) => gatewayJson({ branch: JSON.parse(String(init.body)).branch, commitSha: SHA_COMMIT, baseSha: SHA_BASE, files: 67, dropped: 0 }, 201),
     "POST /api/apps/demo/app/pulls": () => gatewayJson({ number: 12, url: "https://github.com/org/demo-app/pull/12", sha: SHA_COMMIT, autoMerge: { enabled: false, reason: "policy" } }),
     ...overrides,
   };
@@ -238,14 +238,14 @@ describe("createVibeApp and importVibeApp", () => {
     const acct = await connected(w);
     const calls = stubFetch(pipelineHandlers());
     const { session: s, queue } = session(w, acct.id);
-    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() });
+    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app", name: "Demo App" });
     expect(queue.submitAction).toHaveBeenCalledTimes(1);
     const [id, request] = queue.submitAction.mock.calls[0] as unknown as [number, { title: string; description: string; awaitDecision: boolean; actionKind: { tag: string } }];
     expect(id).toBe(approvalId);
     expect(request.awaitDecision).toBe(true);
     expect(request.actionKind.tag).toBe("ng-dots.create-vibe-app");
     expect(request.title).toContain("demo/app");
-    expect(request.description).toMatch(/3 files/);
+    expect(request.description).toMatch(/pinned NG Dots starter template/);
     expect(request.description).toMatch(/ng-dots\/create-[0-9a-f-]{36}/);
     expect(request.description).toMatch(/pull request into `main`/);
     expect(calls).toHaveLength(0);
@@ -262,10 +262,11 @@ describe("createVibeApp and importVibeApp", () => {
     expect(calls.map(c => `${c.method} ${c.url.pathname.replace("/gateway/plugin", "")}`)).toEqual([
       "POST /api/apps", "GET /api/apps/demo/app/default-branch", "POST /api/apps/demo/app/source-branches", "POST /api/apps/demo/app/pulls",
     ]);
-    expect(calls[2].body.operation).toBe("import");
+    expect(calls[2].body).toMatchObject({ operation: "import", framework: "vite", name: "app" });
     expect(calls[2].body.files).toHaveLength(3);
     const status = await s.getVibeAppOperation(approvalId) as any;
     expect(status.state).toBe("completed");
+    expect(status.stages.sourceBranchCreated).toMatchObject({ commitSha: SHA_COMMIT, files: 67, dropped: 0 });
     expect(status.stages.pullRequestOpened).toEqual({ number: 12, url: "https://github.com/org/demo-app/pull/12", autoMergeRequested: false });
     expect(status.notObserved).toEqual(["merged", "deploymentQueued", "deployed", "liveVerified"]);
     // A completed action cannot be applied twice.
@@ -283,7 +284,7 @@ describe("createVibeApp and importVibeApp", () => {
         : gatewayJson({ branch: JSON.parse(String(init.body)).branch, commitSha: SHA_COMMIT }, 201),
     }));
     const { session: s, gatekeeper } = session(w, acct.id);
-    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() });
+    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app" });
     await expect(gatekeeper.applyAction(approvalId)).rejects.toMatchObject({ message: "base_changed", status: 409 });
     let status = await s.getVibeAppOperation(approvalId) as any;
     expect(status).toMatchObject({ state: "failed", lastError: "base_changed" });
@@ -301,14 +302,28 @@ describe("createVibeApp and importVibeApp", () => {
     expect(attempts[0].body.baseSha).toBe(attempts[1].body.baseSha);
   });
 
+  it("stops before publishing when the gateway did not seed the protected workflows", async () => {
+    const w = world();
+    const acct = await connected(w);
+    const calls = stubFetch(pipelineHandlers({ "POST /api/apps": () => gatewayJson({ id: "demo/app", repo: "org/demo-app" }, 201) }));
+    const { session: s, gatekeeper } = session(w, acct.id);
+    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app" });
+    await expect(gatekeeper.applyAction(approvalId)).rejects.toThrow("workflow_seed_unavailable");
+    expect(calls).toHaveLength(1);
+    expect(await s.getVibeAppOperation(approvalId)).toMatchObject({ state: "failed", stages: { repositoryProvisioned: false } });
+  });
+
   it("fails before approval for blocked, unacknowledged or malformed requests", async () => {
     const w = world();
     const acct = await connected(w);
     const calls = stubFetch(pipelineHandlers());
     const { session: s, queue } = session(w, acct.id);
-    await expect(s.createVibeApp({ businessUnit: "Demo", slug: "app", files: sourceFiles() })).rejects.toThrow("valid_business_unit_required");
-    await expect(s.createVibeApp({ businessUnit: "demo", slug: "app", files: [...sourceFiles(), { path: ".env", contentBase64: b64("K=v") }] })).rejects.toThrow(/source_blocked: secret_file/);
-    await expect(s.importVibeApp({ businessUnit: "demo", slug: "app", files: [{ path: "index.html", contentBase64: b64("<p>") }] })).rejects.toThrow(/review_findings_require_acknowledgement: missing_lockfile/);
+    await expect(s.createVibeApp({ businessUnit: "Demo", slug: "app" })).rejects.toThrow("valid_business_unit_required");
+    await expect(s.createVibeApp({ businessUnit: "demo", slug: "app", name: "" })).rejects.toThrow("invalid_name");
+    await expect(s.createVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() } as never)).rejects.toThrow("files_not_supported_for_create");
+    await expect(s.importVibeApp({ businessUnit: "demo", slug: "app", files: [...sourceFiles(), { path: ".env", contentBase64: b64("K=v") }] })).rejects.toThrow(/source_blocked: secret_file/);
+    await expect(s.importVibeApp({ businessUnit: "demo", slug: "app", files: [{ path: "index.html", contentBase64: b64("<p>") }, { path: "server/x.ts", contentBase64: b64("x") }] })).rejects.toThrow(/review_findings_require_acknowledgement: backend_code/);
+    await expect(s.importVibeApp({ businessUnit: "demo", slug: "app", files: [] })).rejects.toThrow("files_required");
     expect(queue.submitAction).not.toHaveBeenCalled();
     expect(calls).toHaveLength(0);
   });
@@ -319,10 +334,10 @@ describe("createVibeApp and importVibeApp", () => {
     stubFetch(pipelineHandlers());
     const { session: s, queue, gatekeeper } = session(w, acct.id);
     queue.submitAction.mockRejectedValueOnce(new Error("queue_down"));
-    await expect(s.createVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() })).rejects.toThrow("queue_down");
+    await expect(s.importVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() })).rejects.toThrow("queue_down");
     expect([...w.gatekeeperKv.data.keys()].filter(k => k.startsWith("operation:"))).toEqual([]);
 
-    const { approvalId } = await s.createVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() });
+    const { approvalId } = await s.importVibeApp({ businessUnit: "demo", slug: "app", files: sourceFiles() });
     await gatekeeper.rejectAction(approvalId);
     expect([...w.gatekeeperKv.data.keys()].filter(k => k.startsWith("operation:"))).toEqual([]);
     await expect(gatekeeper.applyAction(approvalId)).rejects.toThrow("not pending");

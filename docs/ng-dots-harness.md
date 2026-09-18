@@ -54,44 +54,63 @@ POST /plugin/api/apps/:businessUnit/:slug/source-branches
   "operation": "create" | "import",
   "branch": "ng-dots/<create|import>-<uuid>",
   "baseSha": "<current main sha>",
-  "files": [{ "path": "...", "contentBase64": "...", "mode": "100644" | "100755" }],
-  "importReport": { "framework": "...", "reviewedFindingCodes": ["..."] }
+  "name": "<display name, optional>",
+  "framework": "vite" | "cra" | "static",          // import only
+  "files": [{ "path": "...", "contentBase64": "...", "mode": "100644" | "100755" }],   // import only
+  "importReport": { "reviewedFindingCodes": ["..."] }
 }
 ```
+
+The gateway renders the application itself, in trusted hosted code, from the pinned boilerplate
+tarball (`BOILERPLATE_REF`), so no repository-provided scaffold code runs. The renderer is a port of
+the boilerplate `scaffold()` (no modules) and the desktop plugin's `applyImport()`, and its output is
+byte-identical to those (`tests/template-parity.test.mjs`, run with `NG_DOTS_BOILERPLATE_DIR` and
+`NG_DOTS_PLUGIN_DIR`). Identity, owner, and the business unit's Access settings come from the
+gateway's registry, actor, and configuration, never from the request.
+
+- `create` takes no files: the pinned template plus the generated `configuration.yaml`, package name,
+  and README.
+- `import` adds the validated source under `frontend/` with NG Dots' build adapter (`npm ci` and the
+  framework build, `vite.ng-dots.config.mjs` for Vite). `node_modules`, `dist`, `build`, `.next`,
+  `.npmrc` and similar are dropped and counted.
+- `.github/` is never rendered or accepted; the gateway seeds the protected workflows when it
+  provisions the repository.
 
 The gateway re-validates everything at the authority boundary: normalized relative paths, no
 `.git/` or `.github/` paths, no secret-bearing files or symlinks, at most 2000 files, 2 MiB per
 file, 8 MiB total, an exact branch shape, and a 40-hex `baseSha` that must equal the current `main`.
-It derives repository and installation identity from the registry record only, overlays the files on
-`main`'s tree as one commit on the new branch through the existing repository-scoped GitHub App, and
-never writes `main`. The commit message carries a content digest, so repeating the same request
-returns the existing commit and a different payload for an existing branch is rejected. The pull
-request is then opened with the existing `/pulls` endpoint.
+It overlays the tree on `main` as one commit on the new branch through the existing
+repository-scoped GitHub App and never writes `main`. Text files travel inline in the git tree and
+only binary files cost a separate request (at most 300), which keeps large imports under the Worker
+subrequest limit. The commit message carries a digest of the request and the pinned template ref, so
+repeating the same request returns the existing commit and a different payload for an existing
+branch is rejected. The pull request is then opened with the existing `/pulls` endpoint.
 
-Not implemented: server-side rendering of the pinned boilerplate and NG Dots configuration. The
-template contract lives in the private boilerplate repository and the desktop plugin, neither of
-which was available to this work, so the gateway publishes exactly the manifest it is given rather
-than guessing at a template. The built-in agent therefore supplies the complete source tree for both
-create and import. Add trusted server-side rendering once the template contract is available.
+Not supported yet: optional boilerplate modules (`ai`, `database`, and so on) and the plugin's
+generated `.ng-dots/app-manifest.json` and README provenance. A created app is the base template;
+enable modules with a follow-up pull request.
 
 ### 4. End-to-end create and import actions — implemented
 
-`createVibeApp` and `importVibeApp` take `{ businessUnit, slug, files, acknowledgedFindingCodes }`.
-Before anything is queued the Gatekeeper decodes the files, derives sizes from content, runs the
-shared analyzer, and fails on any blocking finding or unacknowledged review finding.
+`createVibeApp({ businessUnit, slug, name? })` and `importVibeApp({ businessUnit, slug, name?, files,
+acknowledgedFindingCodes? })`. Before anything is queued the Gatekeeper decodes an import's files,
+derives sizes from content, runs the shared analyzer, and fails on any blocking finding or
+unacknowledged review finding. The analyzer follows the desktop plugin: Vite and CRA need a root
+`package-lock.json`, Next.js and unknown frameworks are blocking, and backend folders need review.
 
 One approval shows the BU, slug, source summary, accepted review findings, the exact branch, and the
 pull-request intent, and states that merge and deployment are not covered. Nothing reaches the
 gateway before approval. After approval the operation runs as a resumable pipeline: provision the
-repository, read `main`'s SHA (persisted so retries reuse it), publish the source branch, open the
-pull request. A failure records the exact gateway error and keeps finished stages; applying again
-resumes without repeating them.
+repository (and require `workflowsSeeded`, as the plugin does), read `main`'s SHA (persisted so
+retries reuse it), publish the branch, open the pull request. A failure records the exact gateway
+error and keeps finished stages; applying again resumes without repeating them.
 
 `getVibeAppOperation(approvalId)` reports only observed stages: repository provisioned, source
-branch and commit, pull request (number, URL, whether NG Dots enabled auto-merge). Merged, deployment
-queued, deployed, and live verified are listed as `notObserved` and are never inferred. The gateway
-may enable auto-merge on the pull request, so a merge can follow without another approval once the
-repository's checks pass; observe it through the existing status endpoints.
+branch and commit (with the file and dropped-file counts), pull request (number, URL, whether NG Dots
+enabled auto-merge). Merged, deployment queued, deployed, and live verified are listed as
+`notObserved` and are never inferred. The gateway may enable auto-merge on the pull request, so a
+merge can follow without another approval once the repository's checks pass; observe it through the
+existing status endpoints.
 
 ## Completion criteria for the first public milestone
 

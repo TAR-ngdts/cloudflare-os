@@ -20,12 +20,21 @@ export interface NgDotsSourceFile {
   mode?: "100644" | "100755";
 }
 
-export interface NgDotsVibeAppInput {
+export interface NgDotsCreateInput {
   businessUnit: string;
   slug: string;
-  /** Complete source tree: at most 2000 files, 2 MiB each, 8 MiB total. */
+  /** Display name; defaults to the slug. */
+  name?: string;
+}
+
+export interface NgDotsImportInput extends NgDotsCreateInput {
+  /**
+   * The source project's files, relative to its root: at most 2000 files, 2 MiB each, 8 MiB total.
+   * Vite, Create React App and static sites are supported. Vite and CRA need a root package-lock.json.
+   * The source is placed under frontend/; node_modules, dist, build and similar folders are dropped.
+   */
   files: NgDotsSourceFile[];
-  /** Review-level finding codes (for example "missing_lockfile") the requester accepts. Blocking findings cannot be acknowledged. */
+  /** Review-level finding codes (for example "backend_code") the requester accepts. Blocking findings cannot be acknowledged. */
   acknowledgedFindingCodes?: string[];
 }
 
@@ -37,7 +46,7 @@ export interface NgDotsOperationStatus {
   branch: string;
   stages: {
     repositoryProvisioned: boolean;
-    sourceBranchCreated: { branch: string; commitSha: string } | null;
+    sourceBranchCreated: { branch: string; commitSha: string; files?: number; dropped?: number } | null;
     pullRequestOpened: { number: number; url: string; autoMergeRequested: boolean } | null;
   };
   /** Stages that have not been observed yet. Never assume them. */
@@ -51,8 +60,9 @@ export interface NgDotsSession {
   listModels(): Promise<unknown>;
   getApp(appId: string): Promise<unknown>;
   inspectImport(request: NgDotsImportRequest): Promise<unknown>;
-  /** Queues one approval that provisions the repository, publishes the source to a new ng-dots branch, and opens a pull request. */
-  createVibeApp(input: NgDotsVibeAppInput): Promise<{ approvalId: number }>;
-  importVibeApp(input: NgDotsVibeAppInput): Promise<{ approvalId: number }>;
+  /** Queues one approval: provision the repository, publish the pinned NG Dots starter template to a new ng-dots branch, open a pull request. */
+  createVibeApp(input: NgDotsCreateInput): Promise<{ approvalId: number }>;
+  /** Queues one approval: provision the repository, publish the starter template with this source under frontend/, open a pull request. */
+  importVibeApp(input: NgDotsImportInput): Promise<{ approvalId: number }>;
   getVibeAppOperation(approvalId: number): Promise<NgDotsOperationStatus>;
 }
