@@ -52,6 +52,13 @@ type StoredNonce = {
   verifier?: string;
   reconnect?: true;
 };
+/** The account itself is the one resource; the backend hides any vendor that advertises none. */
+const SUPPORTED_RESOURCES: SupportedResource[] = [{
+  urlPattern: "ngdots://account",
+  title: "NG Dots account",
+  description: "Read governed NG Dots state and, with your approval, create or import VibeApps.",
+}];
+
 const NONCE_BYTES = 32;
 const FLOW_TTL_MS = 10 * 60 * 1000;
 const CONNECT_TIMEOUT_MS = 60 * 60 * 1000;
@@ -156,7 +163,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> {
     return { url: `${requireConfig(this.env).baseUrl}/${id.toString()}/${nonce}` };
   }
 
-  async getSupportedResources(): Promise<SupportedResource[]> { return []; }
+  async getSupportedResources(): Promise<SupportedResource[]> { return SUPPORTED_RESOURCES; }
   async getTypeScriptTypes(): Promise<string> { return TYPES_CODE; }
 }
 
@@ -295,7 +302,7 @@ export class NgDotsUser extends WorkerEntrypoint<Env, UserProps> implements Gate
     return me.email ?? null;
   }
 
-  async getSupportedResources(): Promise<SupportedResource[]> { return []; }
+  async getSupportedResources(): Promise<SupportedResource[]> { return SUPPORTED_RESOURCES; }
   getGatekeeperClassFor(_url: string): never { throw new Error("NG Dots is exposed as an account singleton."); }
   async startResourceConfigurator(_resourceUrlPattern: string): Promise<ResourceConfiguratorFrame> { throw new Error("NG Dots has no resource configurator."); }
   async ensureResources(_patterns: string[]): Promise<{ url?: string }> { return {}; }

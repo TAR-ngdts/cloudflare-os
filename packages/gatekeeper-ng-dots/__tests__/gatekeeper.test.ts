@@ -100,6 +100,20 @@ function session(w: ReturnType<typeof world>, id: string) {
 beforeEach(() => { vi.useRealTimers(); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
+describe("vendor listing", () => {
+  it("advertises its account resource so Cloudflare OS does not hide the vendor", async () => {
+    const w = world();
+    const vendor = new GatekeeperVendor({ exports: w.exportsObj } as never, w.env);
+    const resources = await vendor.getSupportedResources();
+    expect(resources).toHaveLength(1);
+    expect(resources[0].urlPattern).toBe("ngdots://account");
+    const described = await w.gatekeeperFor("x").describe();
+    expect(described.url).toBe(resources[0].urlPattern);
+    const acct = await connected(w);
+    expect(await w.exportsObj.NgDotsUser({ props: { userObjectId: acct.id } }).getSupportedResources()).toEqual(resources);
+  });
+});
+
 describe("hosted connection callback", () => {
   it("completes the PKCE handshake with the strict gateway callback shape and rejects replay", async () => {
     const w = world();
