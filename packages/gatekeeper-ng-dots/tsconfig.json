@@ -11,5 +11,6 @@
     }
   },
   "include": ["src", "__tests__"],
-  "exclude": ["dist", "node_modules"]
+  // The opt-in local end-to-end test needs Node types the Worker build deliberately does not load; vitest still runs it.
+  "exclude": ["dist", "node_modules", "__tests__/local-e2e.test.ts"]
 }

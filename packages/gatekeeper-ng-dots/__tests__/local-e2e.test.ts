@@ -25,6 +25,9 @@ const REF = "c3991a41a84806fecf5169e902c607ef288c7e26";
 type Tree = Map<string, { content?: string; sha?: string; mode: string }>;
 type Commit = { message: string; parents: string[]; tree: Tree };
 
+const notFound = () => Object.assign(new Error("github_404"), { status: 404 });
+const mainKey = (repo: string) => `${repo}#refs/heads/main`;
+
 /** Just enough git object storage for the gateway's publish path. */
 function fakeGithub() {
   const commits = new Map<string, Commit>();
@@ -33,13 +36,11 @@ function fakeGithub() {
   const pulls: Array<{ repo: string; number: number; head: string; title: string }> = [];
   let counter = 0, repoCount = 0;
   const sha = () => (++counter).toString(16).padStart(40, "0");
-  const notFound = () => Object.assign(new Error("github_404"), { status: 404 });
   const commit = (repo: string, message: string, parents: string[], tree: Tree) => {
     const id = sha();
     commits.set(id, { message, parents, tree });
     return id;
   };
-  const mainKey = (repo: string) => `${repo}#refs/heads/main`;
   return {
     commits, blobs, refs, pulls,
     seed(repo: string) {
@@ -59,7 +60,7 @@ function fakeGithub() {
       const head = /^\/git\/ref\/heads\/(.+)$/.exec(path);
       if (head) { const id = refs.get(`${app.repo}#refs/heads/${head[1]}`); if (!id) throw notFound(); return { object: { sha: id } }; }
       const cm = /^\/git\/commits\/([0-9a-f]{40})$/.exec(path);
-      if (cm) { const c = commits.get(cm[1]); if (!c) throw notFound(); return { sha: cm[1], message: c.message, parents: c.parents.map(sha => ({ sha })), tree: { sha: cm[1] } }; }
+      if (cm) { const c = commits.get(cm[1]); if (!c) throw notFound(); return { sha: cm[1], message: c.message, parents: c.parents.map(parent => ({ sha: parent })), tree: { sha: cm[1] } }; }
       if (path === "/git/blobs") { const id = sha(); blobs.set(id, body.encoding === "base64" ? atob(body.content) : body.content); return { sha: id }; }
       if (path === "/git/trees") {
         const tree: Tree = new Map(commits.get(body.base_tree)!.tree);
@@ -78,7 +79,7 @@ function fakeGithub() {
       }
       return {};
     },
-    async configureAccess(app: { repo: string }) { refs.has(mainKey(app.repo)) || this.seed(app.repo); },
+    async configureAccess(app: { repo: string }) { if (!refs.has(mainKey(app.repo))) this.seed(app.repo); },
   };
 }
 
