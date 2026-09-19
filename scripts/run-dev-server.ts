@@ -491,6 +491,8 @@ const PASSTHROUGH_GATEKEEPER_VARS: Record<string, string[]> = {
     "MCP_PORTAL_TRUST_ANNOTATIONS", "MCP_PORTAL_HIDDEN_SERVER_IDS", "MCP_ALLOW_INSECURE",
   ],
   "gatekeeper-mcp": ["MCP_ALLOW_INSECURE"],
+  // The NG Dots gateway to connect to; the committed default is a placeholder host.
+  "gatekeeper-ng-dots": ["GATEWAY_URL"],
 };
 
 for (const gk of gatekeepers) {
@@ -498,7 +500,10 @@ for (const gk of gatekeepers) {
   const config = parse(readFileSync(srcPath, "utf8"));
   config.build = devBuildConfig(config.build, gk.dir);
   config.vars = config.vars || {};
-  config.vars.BASE_URL = `http://${backendHost}/gatekeeper/${gk.name.slice("gatekeeper-".length)}`;
+  // Behind a tunnel or proxy the browser reaches the backend at PUBLIC_BASE_URL, and OAuth providers
+  // that only accept HTTPS callbacks need that origin here rather than localhost.
+  const publicOrigin = (process.env.PUBLIC_BASE_URL ?? `http://${backendHost}`).replace(/\/$/, "");
+  config.vars.BASE_URL = `${publicOrigin}/gatekeeper/${gk.name.slice("gatekeeper-".length)}`;
 
   const shared = SHARED_GATEKEEPER_CREDS[gk.name];
   if (shared && process.env[shared.id] && process.env[shared.secret]) {
