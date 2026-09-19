@@ -50,6 +50,9 @@ const VENDOR_LOGO_MAP: Record<string, string> = {
   figma: 'figma',
 }
 
+/** Vendor ids listed first, after any connected ones. */
+const PINNED_VENDOR_IDS = ['ng_dots']
+
 interface VendorEntry {
   id: string
   description: VendorDescription
@@ -308,6 +311,10 @@ export default function OnboardingWizard({
     const aConnected = connectedVendorIds.has(a.id)
     const bConnected = connectedVendorIds.has(b.id)
     if (aConnected !== bConnected) return aConnected ? -1 : 1
+    // Then pinned services, then alphabetical
+    const aPinned = PINNED_VENDOR_IDS.includes(a.id)
+    const bPinned = PINNED_VENDOR_IDS.includes(b.id)
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
     return a.description.displayName.localeCompare(b.description.displayName)
   })
 
